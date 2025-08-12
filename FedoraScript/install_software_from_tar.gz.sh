@@ -72,8 +72,35 @@ echo -e "${GREEN}[✓]${NC} 创建临时目录: ${BLUE}$TEMP_DIR${NC}"
 echo -e "${YELLOW}[*]${NC} 解压源代码..."
 tar -xf "$SOURCE_ARCHIVE" -C "$TEMP_DIR"
 
+# 查找源代码目录
+SRC_DIR=""
+if [ "$(ls -A $TEMP_DIR)" == "$(ls -A $TEMP_DIR/*/)" ]; then
+    # 文件直接在根目录
+    SRC_DIR="$TEMP_DIR"
+else
+    # 找到第一个包含配置文件的目录
+    for dir in "$TEMP_DIR"/*/; do
+        if [ -f "$dir/configure" ] || [ -f "$dir/autogen.sh" ] || [ -f "$dir/CMakeLists.txt" ]; then
+            SRC_DIR="$dir"
+            break
+        fi
+    done
+    # 如果没找到配置文件，使用第一个目录
+    if [ -z "$SRC_DIR" ] && [ -d "$TEMP_DIR"/*/ ]; then
+        SRC_DIR=$(ls -d "$TEMP_DIR"/*/ | head -n 1)
+    fi
+fi
+
+# 检查是否找到源代码目录
+if [ -z "$SRC_DIR" ]; then
+    echo -e "${RED}错误:${NC} 无法找到有效的源代码目录"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
 # 进入源代码目录
-cd "$TEMP_DIR"/*/ || exit 1
+echo -e "${GREEN}[✓]${NC} 进入目录: ${BLUE}$SRC_DIR${NC}"
+cd "$SRC_DIR" || exit 1
 
 # 安装编译工具
 echo -e "${YELLOW}[*]${NC} 安装编译工具..."
