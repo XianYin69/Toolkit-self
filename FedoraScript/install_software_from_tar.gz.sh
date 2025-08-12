@@ -7,14 +7,18 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 检查是否提供了tar.xz文件路径参数
-if [ $# -lt 1 ]; then
-    echo -e "${YELLOW}使用方法:${NC} ${GREEN}$0${NC} ${BLUE}<tar.xz文件路径>${NC}"
+# 提示用户输入文件路径
+echo -e "${YELLOW}请输入压缩文件的路径（支持 .tar.gz 或 .tar.xz）：${NC}"
+read -e SOURCE_ARCHIVE
+
+# 如果用户输入为空，退出脚本
+if [ -z "$SOURCE_ARCHIVE" ]; then
+    echo -e "${RED}错误:${NC} 未输入文件路径"
     exit 1
 fi
 
-# 获取tar.xz文件路径
-SOURCE_ARCHIVE=$1
+# 展开波浪号（如果存在）
+SOURCE_ARCHIVE="${SOURCE_ARCHIVE/#\~/$HOME}"
 
 # 检查文件是否存在
 if [ ! -f "$SOURCE_ARCHIVE" ]; then
