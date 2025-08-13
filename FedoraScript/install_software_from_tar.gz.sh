@@ -114,6 +114,101 @@ if [ ${#EXECUTABLE_FILES[@]} -gt 0 ]; then
     # 获取文件名（不包含路径）
     FILENAME=$(basename "$SELECTED_FILE")
     
+    # 检查程序依赖
+    echo -e "${YELLOW}[*]${NC} 检查程序依赖..."
+    
+    # 检查ldd命令是否可用
+    if ! command -v ldd &> /dev/null; then
+        echo -e "${RED}错误:${NC} 未找到 ldd 命令，无法检查依赖"
+        exit 1
+    fi
+
+    # 获取程序依赖的库文件列表
+    echo -e "${YELLOW}[*]${NC} 分析程序依赖..."
+    MISSING_LIBS=()
+    while IFS= read -r line; do
+        if [[ $line == *"not found"* ]]; then
+            lib_name=$(echo "$line" | awk '{print $1}')
+            MISSING_LIBS+=("$lib_name")
+        fi
+    done < <(ldd "$SELECTED_FILE" 2>&1)
+
+    # 如果有缺失的库，尝试安装
+    if [ ${#MISSING_LIBS[@]} -gt 0 ]; then
+        echo -e "${YELLOW}[*]${NC} 发现缺失的库文件："
+        printf '%s\n' "${MISSING_LIBS[@]/#/    }"
+        
+        echo -e "${YELLOW}[*]${NC} 尝试安装缺失的库..."
+        
+        # 根据不同的发行版使用不同的包管理器
+        case $DISTRO in
+            "ubuntu"|"debian")
+                for lib in "${MISSING_LIBS[@]}"; do
+                    # 使用apt-file搜索包含库文件的包
+                    if ! command -v apt-file &> /dev/null; then
+                        sudo apt-get update
+                        sudo apt-get install -y apt-file
+                        sudo apt-file update
+                    fi
+                    pkg=$(apt-file search -l "$lib" | grep -v "i386\|amd64" | head -n1)
+                    if [ -n "$pkg" ]; then
+                        echo -e "${YELLOW}[*]${NC} 安装包: $pkg"
+                        sudo apt-get install -y "$pkg"
+                    fi
+                done
+                ;;
+            "fedora")
+                for lib in "${MISSING_LIBS[@]}"; do
+                    pkg=$(sudo dnf provides "$lib" | grep -v "i686\|x86_64" | grep -m1 "^[^ ]" | awk '{print $1}')
+                    if [ -n "$pkg" ]; then
+                        echo -e "${YELLOW}[*]${NC} 安装包: $pkg"
+                        sudo dnf install -y "$pkg"
+                    fi
+                done
+                ;;
+            "centos"|"rhel")
+                for lib in "${MISSING_LIBS[@]}"; do
+                    pkg=$(sudo yum provides "$lib" | grep -v "i686\|x86_64" | grep -m1 "^[^ ]" | awk '{print $1}')
+                    if [ -n "$pkg" ]; then
+                        echo -e "${YELLOW}[*]${NC} 安装包: $pkg"
+                        sudo yum install -y "$pkg"
+                    fi
+                done
+                ;;
+            "opensuse"|"suse")
+                for lib in "${MISSING_LIBS[@]}"; do
+                    pkg=$(zypper search -f "$lib" | grep -v "i586\|x86_64" | grep -m1 "^[^ ]" | awk '{print $2}')
+                    if [ -n "$pkg" ]; then
+                        echo -e "${YELLOW}[*]${NC} 安装包: $pkg"
+                        sudo zypper install -y "$pkg"
+                    fi
+                done
+                ;;
+            "arch")
+                for lib in "${MISSING_LIBS[@]}"; do
+                    pkg=$(pacman -Fs "$lib" | grep -m1 "^[^ ]" | awk '{print $1}')
+                    if [ -n "$pkg" ]; then
+                        echo -e "${YELLOW}[*]${NC} 安装包: $pkg"
+                        sudo pacman -S --noconfirm "$pkg"
+                    fi
+                done
+                ;;
+            *)
+                echo -e "${RED}警告:${NC} 不支持的发行版，无法自动安装依赖"
+                ;;
+        esac
+    else
+        echo -e "${GREEN}[✓]${NC} 所有依赖库已满足"
+    fi
+    
+    # 复制程序自带的库文件（如果有）
+    LIBS_DIR="$TEMP_DIR/lib"
+    mkdir -p "$LIBS_DIR"
+    if find "$TEMP_DIR" -name "*.so*" -type f &> /dev/null; then
+        echo -e "${YELLOW}[*]${NC} 复制程序自带的库文件..."
+        find "$TEMP_DIR" -name "*.so*" -type f -exec cp -P {} "$LIBS_DIR/" \;
+    fi
+    
     # 提示用户确认安装位置
     echo -e "${YELLOW}将安装 ${BLUE}$FILENAME${NC} 到系统。请选择安装位置：${NC}"
     echo -e "1. /usr/local/bin/ (推荐，所有用户可用)"
@@ -122,15 +217,44 @@ if [ ${#EXECUTABLE_FILES[@]} -gt 0 ]; then
     
     case $location_choice in
         1)
-            INSTALL_PATH="/usr/local/bin/$FILENAME"
-            echo -e "${YELLOW}[*]${NC} 安装到 ${BLUE}$INSTALL_PATH${NC}..."
-            sudo install -m 755 "$SELECTED_FILE" "$INSTALL_PATH"
+            # 系统级安装
+            INSTALL_BIN="/usr/local/bin"
+            INSTALL_LIB="/usr/local/lib"
+            echo -e "${YELLOW}[*]${NC} 安装到系统目录..."
+            
+            # 创建必要的目录
+            sudo mkdir -p "$INSTALL_BIN" "$INSTALL_LIB"
+            
+            # 安装可执行文件
+            echo -e "${YELLOW}[*]${NC} 安装主程序到 ${BLUE}$INSTALL_BIN/$FILENAME${NC}..."
+            sudo install -m 755 "$SELECTED_FILE" "$INSTALL_BIN/$FILENAME"
+            
+            # 安装依赖库
+            if [ -d "$LIBS_DIR" ] && [ "$(ls -A $LIBS_DIR)" ]; then
+                echo -e "${YELLOW}[*]${NC} 安装依赖库到 ${BLUE}$INSTALL_LIB${NC}..."
+                sudo cp -P "$LIBS_DIR"/* "$INSTALL_LIB/"
+                sudo ldconfig
+            fi
             ;;
         2)
-            mkdir -p ~/bin
-            INSTALL_PATH="$HOME/bin/$FILENAME"
-            echo -e "${YELLOW}[*]${NC} 安装到 ${BLUE}$INSTALL_PATH${NC}..."
-            install -m 755 "$SELECTED_FILE" "$INSTALL_PATH"
+            # 用户级安装
+            mkdir -p ~/bin ~/lib
+            echo -e "${YELLOW}[*]${NC} 安装到用户目录..."
+            
+            # 安装可执行文件
+            echo -e "${YELLOW}[*]${NC} 安装主程序到 ${BLUE}$HOME/bin/$FILENAME${NC}..."
+            install -m 755 "$SELECTED_FILE" "$HOME/bin/$FILENAME"
+            
+            # 安装依赖库
+            if [ -d "$LIBS_DIR" ] && [ "$(ls -A $LIBS_DIR)" ]; then
+                echo -e "${YELLOW}[*]${NC} 安装依赖库到 ${BLUE}$HOME/lib${NC}..."
+                cp -P "$LIBS_DIR"/* "$HOME/lib/"
+                # 添加用户库路径到 LD_LIBRARY_PATH
+                if ! grep -q "export LD_LIBRARY_PATH=.*$HOME/lib" ~/.bashrc; then
+                    echo "export LD_LIBRARY_PATH=\$HOME/lib:\$LD_LIBRARY_PATH" >> ~/.bashrc
+                    source ~/.bashrc
+                fi
+            fi
             ;;
         *)
             echo -e "${RED}错误:${NC} 无效的选择"
