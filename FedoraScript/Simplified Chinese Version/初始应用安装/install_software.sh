@@ -18,13 +18,10 @@ SOFTWARE_LIST=(
     "darktable"
     "kdenlive"
     "libreoffice"
-    #"wechat"
-    #"dingtalk"
     "gnome-boxes"
     "visual-studio-code"
     "android-studio"
     "vlc"
-    "cider" # Apple Music 客户端
     "firefox"
     "kde-applications"
     "blender"
